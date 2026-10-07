@@ -786,16 +786,20 @@ function connectSocket() {
   });
 
   socket.on('rtc:offer', async ({ from, sdp }) => {
-    const pc = ensurePeer(from);
-    await pc.setRemoteDescription(sdp);
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    socket.emit('rtc:answer', { callId: state.callId, to: from, sdp: pc.localDescription });
+    try {
+      const pc = ensurePeer(from);
+      await pc.setRemoteDescription(sdp);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit('rtc:answer', { callId: state.callId, to: from, sdp: pc.localDescription });
+    } catch (e) { console.error('[rtc] answering offer failed:', e); }
   });
 
   socket.on('rtc:answer', async ({ from, sdp }) => {
-    const pc = state.peers.get(from);
-    if (pc) await pc.setRemoteDescription(sdp);
+    try {
+      const pc = state.peers.get(from);
+      if (pc) await pc.setRemoteDescription(sdp);
+    } catch (e) { console.error('[rtc] applying answer failed:', e); }
   });
 
   socket.on('rtc:ice', ({ from, candidate }) => {
@@ -812,21 +816,89 @@ async function getLocalStream() {
       audio: true,
     });
     state.camTrack = state.localStream.getVideoTracks()[0] || null;
+    if (!state.camTrack) {                    // never join a video call with audio only
+      state.localStream.getTracks().forEach(t => t.stop());
+      state.localStream = null;
+      throw new Error('camera produced no video track');
+    }
   }
   return state.localStream;
+}
+
+/* ---- iPhone (Safari) ↔ Android (Chrome) interop helpers ---- */
+// Prefer hardware H.264 for the outgoing video: when Safari and Chrome negotiate
+// some other codec the far side can decode the audio fine but show a black picture.
+function preferVideoCodec(pc) {
+  try {
+    const caps = (typeof RTCRtpReceiver !== 'undefined' && RTCRtpReceiver.getCapabilities)
+      ? RTCRtpReceiver.getCapabilities('video') : null;
+    if (!caps || !caps.codecs || !caps.codecs.length) return;
+    const tx = pc.getTransceivers().find(t => t.sender && t.sender.track && t.sender.track.kind === 'video');
+    if (!tx || typeof tx.setCodecPreferences !== 'function') return;
+    const rank = c => ((c.mimeType || '').toLowerCase() === 'video/h264' ? 1 : 0);
+    tx.setCodecPreferences([...caps.codecs].sort((a, b) => rank(b) - rank(a)));
+  } catch (e) { console.warn('[rtc] setCodecPreferences skipped:', e); }
+}
+
+function tryPlay(v) {
+  if (!v) return;
+  let p;
+  try { p = v.play(); } catch { return; }
+  if (p && p.then) p.catch(() => {
+    // autoplay was refused (no user gesture yet) — retry when media loads or on first tap
+    const again = () => {
+      v.removeEventListener('loadedmetadata', again);
+      document.removeEventListener('pointerdown', again);
+      v.play().catch(() => {});
+    };
+    v.addEventListener('loadedmetadata', again);
+    document.addEventListener('pointerdown', again, { once: true });
+  });
+}
+
+// Health badge on a remote tile so a black picture is explainable:
+// ⏳ = track exists but no frames are arriving; 📷 = camera track gone. Hidden when healthy.
+function watchVideo(userId, v) {
+  if (!v) return;
+  clearTimeout(v._h1); clearTimeout(v._h2);
+  const check = () => {
+    const tile = document.getElementById('tile-' + userId);
+    const flag = tile && tile.querySelector('.flag.vstat');
+    if (!flag || !v.isConnected) return;
+    const t = v.srcObject && v.srcObject.getVideoTracks ? v.srcObject.getVideoTracks()[0] : null;
+    let why = '';
+    if (!t) why = 'no video track from this device';
+    else if (t.readyState !== 'live') why = 'camera track was closed';
+    else if (t.muted) why = 'waiting for the video signal…';
+    else if (!v.videoWidth) why = 'waiting for video frames…';
+    flag.hidden = !why;
+    flag.textContent = why ? '⏳' : '';
+    flag.title = why;
+    if (why) v._h1 = setTimeout(check, 5000);   // keep watching while unhealthy
+  };
+  v._h1 = setTimeout(check, 3000);
+  v._h2 = setTimeout(check, 10000);
 }
 
 function ensurePeer(userId) {
   if (state.peers.has(userId)) return state.peers.get(userId);
   const pc = new RTCPeerConnection(RTC_CONFIG);
   state.localStream.getTracks().forEach(t => pc.addTrack(t, state.localStream));
+  preferVideoCodec(pc);
 
   pc.onicecandidate = e => {
     if (e.candidate) {
       state.socket.emit('rtc:ice', { callId: state.callId, to: userId, candidate: e.candidate });
     }
   };
-  pc.ontrack = e => attachRemoteVideo(userId, e.streams[0]);
+  pc.ontrack = e => {
+    attachRemoteVideo(userId, e.streams[0]);
+    const v = () => document.getElementById('tile-' + userId)?.querySelector('video');
+    const refresh = () => { const el = v(); if (el) { watchVideo(userId, el); } };
+    e.track.addEventListener?.('mute', refresh);
+    e.track.addEventListener?.('unmute', () => { const el = v(); if (el) { tryPlay(el); watchVideo(userId, el); } });
+    e.track.addEventListener?.('ended', refresh);
+  };
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === 'failed') pc.restartIce();
     if (pc.connectionState === 'connected') $('#call-status').textContent = '';
@@ -836,10 +908,12 @@ function ensurePeer(userId) {
 }
 
 async function callPeer(userId) {
-  const pc = ensurePeer(userId);
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  state.socket.emit('rtc:offer', { callId: state.callId, to: userId, sdp: pc.localDescription });
+  try {
+    const pc = ensurePeer(userId);
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    state.socket.emit('rtc:offer', { callId: state.callId, to: userId, sdp: pc.localDescription });
+  } catch (e) { console.error('[rtc] creating offer failed:', e); }
 }
 
 function dropPeer(userId) {
@@ -868,7 +942,7 @@ function attachRemoteVideo(userId, stream) {
     tile.dataset.user = userId;
     tile.innerHTML = `
       <video autoplay playsinline></video>
-      <div class="tile-flags"><span class="flag mic" title="Muted" hidden>🔇</span><span class="flag cam" title="Camera off" hidden>📷</span></div>
+      <div class="tile-flags"><span class="flag mic" title="Muted" hidden>🔇</span><span class="flag cam" title="Camera off" hidden>📷</span><span class="flag vstat" title="" hidden>⏳</span></div>
       <div class="tile-name"></div>
       <button type="button" class="tile-menu-btn" aria-label="Options" data-act="menu">⋮</button>
       <div class="tile-menu" hidden>
@@ -881,7 +955,10 @@ function attachRemoteVideo(userId, stream) {
     $('#video-grid').appendChild(tile);
     if (state.swapped) toggleSwap();          // a new person joined: go back to their video being big
   }
-  tile.querySelector('video').srcObject = stream;
+  const v = tile.querySelector('video');
+  v.srcObject = stream;
+  tryPlay(v);
+  watchVideo(userId, v);
   updateTileName(userId);
   updateTileFlags(userId);
 }
