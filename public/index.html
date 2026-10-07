@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+  <title>Ping — Video Chat</title>
+  <meta name="theme-color" content="#0f1420" />
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Ping" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ============ AUTH ============ -->
+  <div id="auth-view" class="view">
+    <div class="auth-card">
+      <h1 class="logo"><img class="logo-img" src="/logo.png" alt="" />Ping<span>.</span></h1>
+      <p class="tagline">Video calls for everyone</p>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="login">Log in</button>
+        <button class="tab" data-tab="register">Sign up</button>
+      </div>
+
+      <form id="login-form">
+        <input id="login-identifier" placeholder="Email or phone number" autocomplete="username" required />
+        <input id="login-password" type="password" placeholder="Password" autocomplete="current-password" required />
+        <button type="submit" class="btn primary wide">Log in</button>
+      </form>
+
+      <form id="register-form" hidden>
+        <input id="reg-name" placeholder="Your name" required />
+        <input id="reg-identifier" placeholder="Email or phone number" required />
+        <input id="reg-password" type="password" placeholder="Password (min. 6 characters)" autocomplete="new-password" required />
+        <button type="submit" class="btn primary wide">Create account</button>
+      </form>
+
+      <p id="auth-error" class="error"></p>
+    </div>
+  </div>
+
+  <!-- ============ MAIN APP ============ -->
+  <div id="app-view" class="view" hidden>
+    <header class="topbar">
+      <h1 class="logo small"><img class="logo-img" src="/logo.png" alt="" />Ping<span>.</span></h1>
+      <div class="me">
+        <div class="me-info">
+          <strong id="me-name"></strong>
+          <span id="me-identifier" class="muted"></span>
+        </div>
+        <button id="logout-btn" class="btn ghost">Log out</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar">
+        <section>
+          <h2>Contacts</h2>
+          <form id="add-contact-form" class="inline">
+            <input id="add-contact-input" placeholder="Add by email or phone…" />
+            <button type="submit" class="btn primary">Add</button>
+          </form>
+          <ul id="contact-list" class="list"></ul>
+        </section>
+
+        <section>
+          <h2>Groups</h2>
+          <button id="new-group-btn" class="btn ghost wide">＋ New group</button>
+          <ul id="group-list" class="list"></ul>
+        </section>
+      </aside>
+
+      <section class="welcome" id="welcome">
+        <div class="welcome-inner">
+          <h2>Welcome 👋</h2>
+          <p class="muted">Tap a contact or group to chat, or start a video call from the sidebar.</p>
+        </div>
+      </section>
+
+      <section class="chat-panel" id="chat-panel" hidden>
+        <header class="chat-head">
+          <button id="chat-back" class="btn ghost small" aria-label="Back">←</button>
+          <div class="chat-title">
+            <strong id="chat-name"></strong>
+            <span id="chat-sub" class="muted"></span>
+          </div>
+          <button id="chat-call" class="btn primary small">📹 Call</button>
+        </header>
+        <div id="chat-messages" class="chat-messages"></div>
+        <form id="chat-form" class="chat-form" autocomplete="off">
+          <button type="button" id="chat-attach" class="btn ghost attach" aria-label="Send a picture or file" title="Send a picture or file">📎</button>
+          <button type="button" id="chat-loc" class="btn ghost attach" aria-label="Send my location" title="Send my location">📍</button>
+          <input type="file" id="chat-file" multiple hidden />
+          <input id="chat-input" placeholder="Type a message…" maxlength="2000" autocomplete="off" />
+          <button type="submit" class="btn primary">Send</button>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <!-- ============ NEW GROUP MODAL ============ -->
+  <div id="group-modal" class="modal" hidden>
+    <div class="modal-card">
+      <h2 id="group-title">Create group</h2>
+      <input id="group-name" placeholder="Group name" />
+      <div class="modal-sub" id="group-counter"></div>
+      <div id="group-members" class="check-list"></div>
+      <div class="row end">
+        <button id="group-cancel" class="btn ghost">Cancel</button>
+        <button id="group-create" class="btn primary">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ INCOMING CALL MODAL ============ -->
+  <div id="incoming-modal" class="modal" hidden>
+    <div class="modal-card center">
+      <div class="avatar big" id="incoming-avatar">📞</div>
+      <h2 id="incoming-title">Incoming call</h2>
+      <p id="incoming-from" class="muted"></p>
+      <div class="row center">
+        <button id="decline-btn" class="btn danger">Decline</button>
+        <button id="accept-btn" class="btn success">Accept</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ GAME PICKER ============ -->
+  <div id="game-modal" class="modal" hidden>
+    <div class="modal-card">
+      <h2>Play together 🎮</h2>
+      <p class="modal-sub">Everyone in the call gets the same game. Highest score wins.</p>
+      <div id="game-list" class="game-list"></div>
+      <div class="row end"><button id="game-modal-close" class="btn ghost">Close</button></div>
+    </div>
+  </div>
+
+  <!-- ============ CALL VIEW ============ -->
+  <div id="call-view" class="view" hidden>
+    <div class="call-topbar">
+      <span id="call-title"></span>
+      <span id="call-status" class="muted"></span>
+    </div>
+    <div id="mute-banner" class="mute-banner" hidden>
+      <span id="mute-banner-text"></span>
+      <button id="mute-banner-btn" class="btn primary small">Unmute</button>
+    </div>
+    <div id="game-banner" class="game-banner" hidden>
+      <span id="game-banner-text"></span>
+      <button id="game-banner-join" class="btn primary small">Play</button>
+      <button id="game-banner-x" class="btn ghost small" aria-label="Dismiss">✕</button>
+    </div>
+    <div id="video-grid" class="video-grid"></div>
+
+    <!-- the game plays "behind" the small video tiles -->
+    <section id="game-layer" class="game-layer" hidden>
+      <div class="game-bar">
+        <strong id="game-title"></strong>
+        <span id="game-hint" class="game-hint muted"></span>
+        <span class="spacer"></span>
+        <button id="game-end" class="btn ghost small" hidden>End for all</button>
+        <button id="game-hide" class="btn ghost small">Hide</button>
+      </div>
+      <div class="game-body">
+        <div class="game-stage">
+          <canvas id="game-canvas"></canvas>
+          <div id="game-over" class="game-over" hidden>
+            <div class="go-title">Game over</div>
+            <div class="go-score">Your score <b id="go-score">0</b></div>
+            <button id="game-again" class="btn primary">Play again</button>
+          </div>
+        </div>
+        <ol id="game-board" class="game-board"></ol>
+      </div>
+      <div id="touch-pad" class="touch-pad"></div>
+    </section>
+
+    <div class="call-controls">
+      <button id="mute-btn" class="ctrl" title="Mute microphone">🎙️</button>
+      <button id="video-btn" class="ctrl" title="Turn camera off">📷</button>
+      <button id="filter-btn" class="ctrl" title="Camera filters" aria-label="Camera filters">✨</button>
+      <button id="chat-call-btn" class="ctrl" title="Chat" aria-label="Chat">💬<span id="cc-badge" class="badge ctrl-badge" hidden></span></button>
+      <button id="game-btn" class="ctrl" title="Play a game together">🎮</button>
+      <button id="leave-btn" class="ctrl leave" title="Leave call">📞</button>
+    </div>
+
+    <!-- my own camera: floats above everything and can be dragged anywhere -->
+    <div id="local-tile" class="local-tile mirror" title="Drag me anywhere">
+      <video id="vid-local" autoplay muted playsinline></video>
+      <div class="local-off">Camera off</div>
+      <div class="local-flags"><span class="flag mic" title="Muted" hidden>🔇</span><span class="flag cam" title="Camera off" hidden>📷</span></div>
+      <button type="button" class="local-btn local-mic" id="local-mic" aria-label="Mute or unmute">🎙️</button>
+      <button type="button" class="local-btn local-flip" id="local-flip" aria-label="Flip camera" title="Flip camera" hidden>🔄</button>
+    </div>
+
+    <!-- camera filters -->
+    <div id="filter-tray" class="filter-tray" hidden>
+      <div class="ft-head"><strong>✨ Filters</strong><span id="ft-status" class="ft-status"></span><span class="spacer"></span>
+        <button type="button" id="ft-close" class="btn ghost small" aria-label="Close filters">✕</button></div>
+      <div class="ft-label">Looks</div>
+      <div id="ft-simple" class="ft-row"></div>
+      <div class="ft-label">Face effects <span class="muted">· follow your face</span></div>
+      <div id="ft-fancy" class="ft-row"></div>
+    </div>
+
+    <!-- chat during the call -->
+    <aside id="call-chat" class="call-chat" hidden>
+      <header class="cc-head">
+        <strong>💬 Chat</strong><span id="cc-sub" class="muted"></span>
+        <span class="spacer"></span>
+        <button type="button" id="cc-close" class="btn ghost small" aria-label="Close chat">✕</button>
+      </header>
+      <div id="cc-messages" class="chat-messages"></div>
+      <form id="cc-form" class="chat-form" autocomplete="off">
+        <button type="button" id="cc-attach" class="btn ghost attach" aria-label="Send a picture or file">📎</button>
+        <button type="button" id="cc-loc" class="btn ghost attach" aria-label="Send my location" title="Send my location">📍</button>
+        <input type="file" id="cc-file" multiple hidden />
+        <input id="cc-input" placeholder="Message…" maxlength="2000" autocomplete="off" />
+        <button type="submit" class="btn primary">Send</button>
+      </form>
+    </aside>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="games.js?v=2"></script>
+  <script src="countries.js?v=2"></script>
+  <script src="filters.js?v=2"></script>
+  <script src="app.js?v=2"></script>
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>
